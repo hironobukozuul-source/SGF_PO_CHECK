@@ -3,10 +3,11 @@ import pandas as pd
 import datetime
 import io
 
-# Professional UI Styling
+# Set page configuration
 st.set_page_config(page_title="SAP PO Auditor", page_icon="📦", layout="wide")
 
 def Gen_PM_BOM(plan_data, CU_data_, DU_data_):
+    """Core logic to generate BOM based on plan data and master lists."""
     abc = pd.DataFrame()
     for i in range(len(plan_data)):
         current_row = plan_data.iloc[[i], :].copy()
@@ -44,13 +45,13 @@ def Gen_PM_BOM(plan_data, CU_data_, DU_data_):
 
 st.title("📦 SAP PO Comparison Tool")
 
-# Sidebar for Master Data
+# Sidebar
 with st.sidebar:
     st.header("1. Master Data")
     cu_file = st.file_uploader("Upload CU List (Excel)", type=["xlsx"])
     du_file = st.file_uploader("Upload DU List (Excel)", type=["xlsx"])
 
-# Main area
+# Main Area
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("Old Plan")
@@ -73,6 +74,7 @@ if st.button("🔍 Generate Highlighted Comparison"):
                     df["Product Code"] = df["Material Code"].map(mapping).fillna("Unknown")
                     return df
 
+                # Processing logic
                 prev_bom = Gen_PM_BOM(process_plan(p_plan_file), CU_data, DU_data)
                 new_bom = Gen_PM_BOM(process_plan(n_plan_file), CU_data, DU_data)
                 
@@ -80,39 +82,54 @@ if st.button("🔍 Generate Highlighted Comparison"):
                 prev_bom.set_index(idx_cols, inplace=True)
                 new_bom.set_index(idx_cols, inplace=True)
                 
-                comparison = prev_bom.join(new_bom, lsuffix='_OLD', rsuffix='_NEW', how='outer').fillna(0)
+                comparison = prev_bom.join(new_bom, lsuffix='_OLD', rsuffix='_NEW', how='outer').fillna(0).reset_index()
 
-                # Export to Excel with light Red Highlighting
+                # Excel Export logic
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                    comparison.to_excel(writer, sheet_name='Comparison')
+                    comparison.to_excel(writer, sheet_name='Comparison', index=False)
                     
                     workbook  = writer.book
                     worksheet = writer.sheets['Comparison']
                     
-                    # Format: Light Red Background
+                    # Light Red Background Format
                     red_format = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006'})
                     
-                    max_row = len(comparison)
-                    # Total columns including indices
-                    max_col = len(comparison.columns) + len(comparison.index.names)
+                    # DYNAMICALLY FIND COLUMN LETTERS
+                    # We find the index of the columns to ensure the formula is always correct
+                    cols = list(comparison.columns)
+                    old_qty_idx = cols.index("Necessary Quantity_OLD")
+                    new_qty_idx = cols.index("Necessary Quantity_NEW")
+                    
+                    # Convert index to Excel letters (e.g., 10 -> K, 17 -> R)
+                    def get_col_letter(n):
+                        string = ""
+                        while n >= 0:
+                            string = chr(n % 26 + 65) + string
+                            n = n // 26 - 1
+                        return string
 
-                    # Formula: Compare Column K and Column R
-                    # Row 2 is the first row of data
+                    col_old = get_col_letter(old_qty_idx)
+                    col_new = get_col_letter(new_qty_idx)
+
+                    max_row = len(comparison)
+                    max_col = len(comparison.columns)
+
+                    # Updated Formula: Uses dynamic letters determined above
                     worksheet.conditional_format(1, 0, max_row, max_col - 1, {
                         'type':     'formula',
-                        'formula':  '=$K2<>$R2',
+                        'formula':  f'=${col_old}2<>${col_new}2',
                         'format':   red_format
                     })
 
-                st.success("✅ Comparison Generated!")
+                st.success("✅ Comparison complete!")
                 st.download_button(
-                    label="📥 Download Red Highlighted Report",
+                    label="📥 Download Light Red Highlighted Report",
                     data=output.getvalue(),
                     file_name="PO_Comparison_Red_Highlights.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
         except Exception as e:
-            st.error(f"Logic Error: {e}")
+            st.error(f"Error: {e}")
     else:
-        st.error("Missing files! Please upload all 4 required SAP exports.")
+        st.error("Please upload all 4 files.")
