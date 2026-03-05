@@ -3,7 +3,7 @@ import pandas as pd
 import datetime
 import io
 
-# Set page configuration
+# Professional UI Styling
 st.set_page_config(page_title="SAP PO Auditor", page_icon="📦", layout="wide")
 
 def Gen_PM_BOM(plan_data, CU_data_, DU_data_):
@@ -28,8 +28,7 @@ def Gen_PM_BOM(plan_data, CU_data_, DU_data_):
             abc = pd.concat([abc, tmp_[["Component Number","Component Description","Necessary Quantity","Material Code","Product Code","Production Start"]]])
     
         # CU Logic
-        cu_matches = DU_data_[(DU_data_["Parent material number"] == tmp) & 
-                             (DU_data_['Component Description'].str.contains("_CU", na=False))]
+        cu_matches = DU_data_[(DU_data_["Parent material number"] == tmp) & (DU_data_['Component Description'].str.contains("_CU", na=False))]
         if not cu_matches.empty:
             CU_NO = cu_matches["Component Number"].iloc[0]
             tmp__ = CU_data_[(CU_data_["Parent material number"] == CU_NO) & 
@@ -51,7 +50,7 @@ with st.sidebar:
     cu_file = st.file_uploader("Upload CU List (Excel)", type=["xlsx"])
     du_file = st.file_uploader("Upload DU List (Excel)", type=["xlsx"])
 
-# Main Area
+# Main area
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("Old Plan")
@@ -74,7 +73,6 @@ if st.button("🔍 Generate Highlighted Comparison"):
                     df["Product Code"] = df["Material Code"].map(mapping).fillna("Unknown")
                     return df
 
-                # Processing logic
                 prev_bom = Gen_PM_BOM(process_plan(p_plan_file), CU_data, DU_data)
                 new_bom = Gen_PM_BOM(process_plan(n_plan_file), CU_data, DU_data)
                 
@@ -82,9 +80,9 @@ if st.button("🔍 Generate Highlighted Comparison"):
                 prev_bom.set_index(idx_cols, inplace=True)
                 new_bom.set_index(idx_cols, inplace=True)
                 
+                # IMPORTANT: Use reset_index() so data repeats on every row like your sample
                 comparison = prev_bom.join(new_bom, lsuffix='_OLD', rsuffix='_NEW', how='outer').fillna(0).reset_index()
 
-                # Excel Export logic
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     comparison.to_excel(writer, sheet_name='Comparison', index=False)
@@ -92,41 +90,39 @@ if st.button("🔍 Generate Highlighted Comparison"):
                     workbook  = writer.book
                     worksheet = writer.sheets['Comparison']
                     
-                    # Light Red Background Format
+                    # Style: Light Red Background with Dark Red Text
                     red_format = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006'})
                     
-                    # DYNAMICALLY FIND COLUMN LETTERS
-                    # We find the index of the columns to ensure the formula is always correct
+                    # Dynamically find column letters for OLD and NEW Necessary Quantity
                     cols = list(comparison.columns)
-                    old_qty_idx = cols.index("Necessary Quantity_OLD")
-                    new_qty_idx = cols.index("Necessary Quantity_NEW")
-                    
-                    # Convert index to Excel letters (e.g., 10 -> K, 17 -> R)
-                    def get_col_letter(n):
-                        string = ""
+                    old_idx = cols.index("Necessary Quantity_OLD")
+                    new_idx = cols.index("Necessary Quantity_NEW")
+
+                    def col_to_letter(n):
+                        res = ""
                         while n >= 0:
-                            string = chr(n % 26 + 65) + string
+                            res = chr(n % 26 + 65) + res
                             n = n // 26 - 1
-                        return string
+                        return res
 
-                    col_old = get_col_letter(old_qty_idx)
-                    col_new = get_col_letter(new_qty_idx)
+                    letter_old = col_to_letter(old_idx)
+                    letter_new = col_to_letter(new_idx)
 
-                    max_row = len(comparison)
-                    max_col = len(comparison.columns)
+                    last_row = len(comparison)
+                    last_col = len(cols) - 1
 
-                    # Updated Formula: Uses dynamic letters determined above
-                    worksheet.conditional_format(1, 0, max_row, max_col - 1, {
+                    # Apply formula: If Old Qty != New Qty, highlight the whole row red
+                    worksheet.conditional_format(1, 0, last_row, last_col, {
                         'type':     'formula',
-                        'formula':  f'=${col_old}2<>${col_new}2',
+                        'formula':  f'=${letter_old}2<>${letter_new}2',
                         'format':   red_format
                     })
 
-                st.success("✅ Comparison complete!")
+                st.success("✅ Comparison Generated Successfully!")
                 st.download_button(
-                    label="📥 Download Light Red Highlighted Report",
+                    label="📥 Download Highlighted Report",
                     data=output.getvalue(),
-                    file_name="PO_Comparison_Red_Highlights.xlsx",
+                    file_name="PO_Comparison_Red_Final.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
         except Exception as e:
