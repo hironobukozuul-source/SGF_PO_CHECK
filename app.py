@@ -3,11 +3,10 @@ import pandas as pd
 import datetime
 import io
 
-# Set page configuration
+# Professional UI Styling
 st.set_page_config(page_title="SAP PO Auditor", page_icon="📦", layout="wide")
 
 def Gen_PM_BOM(plan_data, CU_data_, DU_data_):
-    """Core logic to generate BOM based on plan data and master lists."""
     abc = pd.DataFrame()
     for i in range(len(plan_data)):
         current_row = plan_data.iloc[[i], :].copy()
@@ -15,7 +14,7 @@ def Gen_PM_BOM(plan_data, CU_data_, DU_data_):
         tmp = current_row['Material Code'].values[0]
         abc = pd.concat([abc, current_row])
         
-        # DU Logic for OUTER components
+        # DU Logic
         tmp_ = DU_data_[(DU_data_["Parent material number"] == tmp) & 
                         (DU_data_['Component Description'].str.contains("OUTER", na=False))].copy()
         
@@ -27,7 +26,7 @@ def Gen_PM_BOM(plan_data, CU_data_, DU_data_):
             tmp_["Production Start"] = current_row['Production Start'].values[0]
             abc = pd.concat([abc, tmp_[["Component Number","Component Description","Necessary Quantity","Material Code","Product Code","Production Start"]]])
     
-        # CU Logic for _CU components
+        # CU Logic
         cu_matches = DU_data_[(DU_data_["Parent material number"] == tmp) & 
                              (DU_data_['Component Description'].str.contains("_CU", na=False))]
         if not cu_matches.empty:
@@ -45,13 +44,13 @@ def Gen_PM_BOM(plan_data, CU_data_, DU_data_):
 
 st.title("📦 SAP PO Comparison Tool")
 
-# Sidebar
+# Sidebar for Master Data
 with st.sidebar:
     st.header("1. Master Data")
     cu_file = st.file_uploader("Upload CU List (Excel)", type=["xlsx"])
     du_file = st.file_uploader("Upload DU List (Excel)", type=["xlsx"])
 
-# Main Area
+# Main area
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("Old Plan")
@@ -83,7 +82,7 @@ if st.button("🔍 Generate Highlighted Comparison"):
                 
                 comparison = prev_bom.join(new_bom, lsuffix='_OLD', rsuffix='_NEW', how='outer').fillna(0)
 
-                # Excel Export logic
+                # Export to Excel with light Red Highlighting
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     comparison.to_excel(writer, sheet_name='Comparison')
@@ -91,28 +90,29 @@ if st.button("🔍 Generate Highlighted Comparison"):
                     workbook  = writer.book
                     worksheet = writer.sheets['Comparison']
                     
-                    # NEW: Light Red Background Format
-                    highlight_fmt = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006'})
+                    # Format: Light Red Background
+                    red_format = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006'})
                     
                     max_row = len(comparison)
+                    # Total columns including indices
                     max_col = len(comparison.columns) + len(comparison.index.names)
 
-                    # Updated Formula: Comparing Column K ($K) and Column R ($R)
-                    # Starts from row 2 (header is 1)
+                    # Formula: Compare Column K and Column R
+                    # Row 2 is the first row of data
                     worksheet.conditional_format(1, 0, max_row, max_col - 1, {
                         'type':     'formula',
                         'formula':  '=$K2<>$R2',
-                        'format':   highlight_fmt
+                        'format':   red_format
                     })
 
-                st.success("✅ Processed successfully!")
+                st.success("✅ Comparison Generated!")
                 st.download_button(
-                    label="📥 Download Light Red Highlighted Report",
+                    label="📥 Download Red Highlighted Report",
                     data=output.getvalue(),
                     file_name="PO_Comparison_Red_Highlights.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Logic Error: {e}")
     else:
-        st.error("Please upload all 4 files.")
+        st.error("Missing files! Please upload all 4 required SAP exports.")
