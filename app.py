@@ -7,7 +7,6 @@ import io
 st.set_page_config(page_title="SAP PO Auditor", page_icon="📦", layout="wide")
 
 def Gen_PM_BOM(plan_data, CU_data_, DU_data_):
-    """Core logic to generate BOM based on plan data and master lists."""
     abc = pd.DataFrame()
     for i in range(len(plan_data)):
         current_row = plan_data.iloc[[i], :].copy()
@@ -28,7 +27,8 @@ def Gen_PM_BOM(plan_data, CU_data_, DU_data_):
             abc = pd.concat([abc, tmp_[["Component Number","Component Description","Necessary Quantity","Material Code","Product Code","Production Start"]]])
     
         # CU Logic
-        cu_matches = DU_data_[(DU_data_["Parent material number"] == tmp) & (DU_data_['Component Description'].str.contains("_CU", na=False))]
+        cu_matches = DU_data_[(DU_data_["Parent material number"] == tmp) & 
+                             (DU_data_['Component Description'].str.contains("_CU", na=False))]
         if not cu_matches.empty:
             CU_NO = cu_matches["Component Number"].iloc[0]
             tmp__ = CU_data_[(CU_data_["Parent material number"] == CU_NO) & 
@@ -50,7 +50,7 @@ with st.sidebar:
     cu_file = st.file_uploader("Upload CU List (Excel)", type=["xlsx"])
     du_file = st.file_uploader("Upload DU List (Excel)", type=["xlsx"])
 
-# Main area
+# Main Area
 col1, col2 = st.columns(2)
 with col1:
     st.subheader("Old Plan")
@@ -62,7 +62,7 @@ with col2:
 if st.button("🔍 Generate Highlighted Comparison"):
     if all([cu_file, du_file, p_plan_file, n_plan_file]):
         try:
-            with st.spinner("Processing..."):
+            with st.spinner("Analyzing differences..."):
                 CU_data = pd.read_excel(cu_file)
                 DU_data = pd.read_excel(du_file)
                 
@@ -73,16 +73,23 @@ if st.button("🔍 Generate Highlighted Comparison"):
                     df["Product Code"] = df["Material Code"].map(mapping).fillna("Unknown")
                     return df
 
+                # 1. Process BOMs
                 prev_bom = Gen_PM_BOM(process_plan(p_plan_file), CU_data, DU_data)
                 new_bom = Gen_PM_BOM(process_plan(n_plan_file), CU_data, DU_data)
                 
+                # 2. Align data
                 idx_cols = ["Material Code","Product Code","Production Start","Component Number"]
                 prev_bom.set_index(idx_cols, inplace=True)
                 new_bom.set_index(idx_cols, inplace=True)
                 
-                # IMPORTANT: Use reset_index() so data repeats on every row like your sample
+                # 3. Join and Flatten (Ensures repeated rows for Material Code)
                 comparison = prev_bom.join(new_bom, lsuffix='_OLD', rsuffix='_NEW', how='outer').fillna(0).reset_index()
 
+                # 4. PRE-CALCULATE DISCREPANCIES (Python finds the red rows)
+                # We identify indices where the Old Necessary Qty doesn't match the New one
+                diff_indices = comparison[comparison['Necessary Quantity_OLD'] != comparison['Necessary Quantity_NEW']].index.tolist()
+
+                # 5. Export with Static Highlighting
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     comparison.to_excel(writer, sheet_name='Comparison', index=False)
@@ -90,39 +97,22 @@ if st.button("🔍 Generate Highlighted Comparison"):
                     workbook  = writer.book
                     worksheet = writer.sheets['Comparison']
                     
-                    # Style: Light Red Background with Dark Red Text
+                    # Exact format: Light Red background, Dark Red text
                     red_format = workbook.add_format({'bg_color': '#FFC7CE', 'font_color': '#9C0006'})
                     
-                    # Dynamically find column letters for OLD and NEW Necessary Quantity
-                    cols = list(comparison.columns)
-                    old_idx = cols.index("Necessary Quantity_OLD")
-                    new_idx = cols.index("Necessary Quantity_NEW")
+                    # Apply formatting to the identified rows (Static)
+                    # We add 1 to the index because Row 0 in Excel is the Header
+                    for row_idx in diff_indices:
+                        worksheet.set_row(row_idx + 1, None, red_format)
 
-                    def col_to_letter(n):
-                        res = ""
-                        while n >= 0:
-                            res = chr(n % 26 + 65) + res
-                            n = n // 26 - 1
-                        return res
+                    # Autofit columns for a professional look
+                    worksheet.set_column(0, len(comparison.columns)-1, 15)
 
-                    letter_old = col_to_letter(old_idx)
-                    letter_new = col_to_letter(new_idx)
-
-                    last_row = len(comparison)
-                    last_col = len(cols) - 1
-
-                    # Apply formula: If Old Qty != New Qty, highlight the whole row red
-                    worksheet.conditional_format(1, 0, last_row, last_col, {
-                        'type':     'formula',
-                        'formula':  f'=${letter_old}2<>${letter_new}2',
-                        'format':   red_format
-                    })
-
-                st.success("✅ Comparison Generated Successfully!")
+                st.success(f"✅ Found {len(diff_indices)} discrepancies.")
                 st.download_button(
                     label="📥 Download Highlighted Report",
                     data=output.getvalue(),
-                    file_name="PO_Comparison_Red_Final.xlsx",
+                    file_name=f"PO_Audit_{datetime.datetime.now().strftime('%Y%m%d')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
         except Exception as e:
